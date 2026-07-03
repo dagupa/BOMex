@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BOMex V.0</title>
     <!-- Librería para Exportación a Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="lib/xlsx.full.min.js"></script>
     <style>
         :root {
             /* Paleta SAP Estándar */
@@ -67,6 +67,7 @@
             --col-desc2-w: 200px;
             --col-desc3-w: 200px;
             --col-granel-w: 80px;
+            --col-nota-w: 200px;
         }
 
         [data-theme="dark"] {
@@ -487,6 +488,7 @@
         .col-desc2 { width: var(--col-desc2-w); }
         .col-desc3 { width: var(--col-desc3-w); }
         .col-granel { width: var(--col-granel-w); }
+        .col-nota { width: var(--col-nota-w); }
 
         #bom-tree-container.hide-revcheck .col-revcheck { display: none !important; }
         #bom-tree-container.hide-toggle .col-toggle { display: none !important; }
@@ -508,6 +510,7 @@
         #bom-tree-container.hide-desc2 .col-desc2 { display: none !important; }
         #bom-tree-container.hide-desc3 .col-desc3 { display: none !important; }
         #bom-tree-container.hide-granel .col-granel { display: none !important; }
+        #bom-tree-container.hide-nota .col-nota { display: none !important; }
 
         .level-badge { font-size: 0.75rem; background: var(--sap-shell-color); color: #fff !important; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
         .qty-badge { font-size: 0.75rem; background: #e1f0fb; color: #005691 !important; padding: 2px 8px; border-radius: 12px; font-weight: bold; white-space: nowrap; }
@@ -540,6 +543,15 @@
         .error-status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 8px; vertical-align: middle; transition: background-color 0.3s ease; }
         @keyframes dot-blink-animation { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
         .dot-blink { animation: dot-blink-animation 1.5s infinite ease-in-out; }
+
+        #note-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2999; background: transparent; }
+        #note-popover { position: fixed; background: var(--sap-card-bg); border: 1px solid var(--sap-border); border-left: 3px solid var(--sap-gold); border-radius: 6px; padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.35); z-index: 3000; width: 270px; display: flex; flex-direction: column; gap: 8px; }
+        #note-textarea { width: 100%; resize: vertical; border: 1px solid var(--sap-border); border-radius: 4px; padding: 6px 8px; font-size: 0.85rem; background: var(--sap-background); color: var(--sap-text); font-family: '72', Arial, sans-serif; min-height: 80px; }
+        .note-btn { background: none; border: none; padding: 2px; color: var(--sap-text); cursor: pointer; opacity: 0.3; transition: all 0.2s; display: inline-flex; align-items: center; vertical-align: middle; box-shadow: none; min-width: auto; flex-shrink: 0; }
+        .note-btn:hover { opacity: 1; transform: scale(1.1); }
+        .note-btn.has-note { opacity: 1; color: var(--sap-gold); }
+        .note-display { font-size: 0.78rem; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; cursor: pointer; margin-left: 4px; }
+        .note-display:hover { opacity: 1; }
     </style>
 </head>
 <body data-theme="dark"> 
@@ -760,6 +772,16 @@
                             <strong>Control 693A:</strong> Indica ausencia del grupo 693A o error en su operación (debe ser 9998).
                         </li>
                     </ul>
+
+                    <h3 style="color: var(--sap-blue); margin: 20px 0 10px 0;">Notas por Componente</h3>
+                    <ul style="list-style: none;">
+                        <li style="margin-bottom: 8px;"><strong>Columna Notas:</strong> Icono de lápiz en cada fila. Si ya existe nota, el lápiz se ilumina en dorado y aparece el texto resumido.</li>
+                        <li style="margin-bottom: 8px;"><strong>Crear / Editar:</strong> Clic en el lápiz o en el texto de la nota para abrir el panel de edición flotante.</li>
+                        <li style="margin-bottom: 8px;"><strong>Guardar:</strong> Botón 💾 o <kbd>Ctrl+Enter</kbd>. Las notas se guardan en el navegador y persisten entre sesiones.</li>
+                        <li style="margin-bottom: 8px;"><strong>Eliminar nota actual:</strong> Botón 🗑 del panel (solo activo si ya existe nota). Pide confirmación.</li>
+                        <li style="margin-bottom: 8px;"><strong>Borrar todas:</strong> Icono 🗑 en la cabecera de la columna NOTAS. Pide confirmación antes de actuar.</li>
+                        <li style="margin-bottom: 8px;"><strong>Clave única:</strong> Cada nota se asocia a Componente + Nº POS + PADRE + OPERACIÓN, por lo que el mismo código puede tener notas distintas según su posición en la lista.</li>
+                    </ul>
                 </div>
 
                 <div>
@@ -770,7 +792,7 @@
                         <li style="margin-bottom: 8px;"><strong>Aislar Selección:</strong> Muestra únicamente las filas que has marcado con el check.</li>
                         <li style="margin-bottom: 8px;"><strong>Icono Papelera:</strong> Limpia todos los filtros y búsquedas activas.</li>
                         <li style="margin-bottom: 8px;"><strong>Expandir / Colapsar:</strong> Abre o cierra todas las ramas visibles del árbol.</li>
-                        <li style="margin-bottom: 8px;"><strong>Copia / Excel:</strong> Exporta la vista actual manteniendo la jerarquía filtrada.</li>
+                        <li style="margin-bottom: 8px;"><strong>Copia / Excel:</strong> Exporta la vista actual manteniendo la jerarquía filtrada. Incluye la columna de Notas.</li>
                     </ul>
 
                     <h3 style="color: var(--sap-blue); margin: 20px 0 10px 0;">Atajos en Filas</h3>
@@ -784,6 +806,7 @@
                             <svg style="vertical-align: middle; color: var(--sap-blue); width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 15l-6-6-6 6"/></svg>
                             <strong>Navegar al Padre:</strong> Localiza y enfoca visualmente el componente superior directo.
                         </li>
+                        <li style="margin-bottom: 8px;"><strong>Clic en OPERACIÓN / DESC. OP. / GRUPO / PADRE:</strong> Filtra la lista automáticamente por el valor de esa celda. El texto se subraya al pasar el cursor para indicar que es clicable.</li>
                     </ul>
                 </div>
             </div>
@@ -816,6 +839,19 @@
         <label class="column-option"><input type="checkbox" checked data-column="desc2"> Descrip. 2</label>
         <label class="column-option"><input type="checkbox" checked data-column="desc3"> Descrip. 3</label>
         <label class="column-option"><input type="checkbox" checked data-column="granel"> Granel</label>
+        <label class="column-option"><input type="checkbox" checked data-column="nota"> Notas</label>
+    </div>
+
+    <div id="note-overlay" class="hidden" onclick="closeNotePopover()"></div>
+    <div id="note-popover" class="hidden">
+        <div style="font-size:0.75rem;font-weight:bold;color:var(--sap-gold);text-transform:uppercase;display:flex;align-items:center;gap:6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Nota del material</div>
+        <textarea id="note-textarea" placeholder="Escribe una nota..." onkeydown="if(event.key==='Escape')closeNotePopover();if(event.key==='Enter'&&event.ctrlKey)saveCurrentNote();"></textarea>
+        <div style="display:flex;gap:6px;align-items:stretch;">
+            <button onclick="saveCurrentNote()" style="flex:1;padding:6px 8px;" title="Guardar (Ctrl+Enter)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+            <button id="note-delete-btn" onclick="if(confirm('\u00bfEliminar esta nota?'))deleteCurrentNote();" style="padding:6px 8px;background-color:var(--sap-error);" title="Eliminar esta nota"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>
+            <button onclick="closeNotePopover()" class="ghost" style="padding:6px 10px;" title="Cerrar (Esc)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div style="font-size:0.7rem;opacity:0.5;">Ctrl+Enter para guardar · Esc para cerrar</div>
     </div>
 
     <footer>
@@ -941,8 +977,11 @@
     let nodeMap = new Map();
     let currentListType = "Producción";
     let currentMatchIndex = 0;
+    const NOTES_KEY = 'sap_bom_notes';
+    let notesStore = {};
+    let currentNoteId = null;
     
-    const DEFAULT_COLUMNS = ['revcheck', 'toggle', 'level', 'pos', 'cclas', 'comp', 'desc', 'qty', 'padre', 'relcc', 'op', 'opdesc', 'aprov', 'esp', 'grupo', 'relevfab', 'desc1', 'desc2', 'desc3', 'granel'];
+    const DEFAULT_COLUMNS = ['revcheck', 'toggle', 'level', 'pos', 'cclas', 'comp', 'desc', 'qty', 'padre', 'relcc', 'op', 'opdesc', 'aprov', 'esp', 'grupo', 'relevfab', 'desc1', 'desc2', 'desc3', 'granel', 'nota'];
     let columnOrder = [...DEFAULT_COLUMNS];
 
     const container = document.getElementById('bom-tree-container');
@@ -1078,6 +1117,31 @@
     }
 
     loadSettings();
+
+    function loadNotes() { try { const s = localStorage.getItem(NOTES_KEY); if (s) notesStore = JSON.parse(s); } catch(e) { notesStore = {}; } }
+    function saveNote(id, text) { if (text && text.trim()) notesStore[id] = text.trim(); else delete notesStore[id]; localStorage.setItem(NOTES_KEY, JSON.stringify(notesStore)); }
+    function noteKey(n) { return n.id + '|' + (n.pos || '') + '|' + (n.parentBOM || '') + '|' + (n.op || ''); }
+    function openNotePopover(event, materialId) {
+        event.stopPropagation();
+        currentNoteId = materialId;
+        const popover = document.getElementById('note-popover');
+        const textarea = document.getElementById('note-textarea');
+        textarea.value = notesStore[materialId] || '';
+        const rect = event.currentTarget.getBoundingClientRect();
+        const left = Math.min(rect.left, window.innerWidth - 290);
+        const topPos = rect.bottom + 8;
+        popover.style.left = left + 'px';
+        popover.style.top = (topPos + 220 > window.innerHeight ? Math.max(rect.top - 220, 8) : topPos) + 'px';
+        popover.classList.remove('hidden');
+        document.getElementById('note-overlay').classList.remove('hidden');
+        document.getElementById('note-delete-btn').disabled = !notesStore[materialId];
+        textarea.focus();
+    }
+    function saveCurrentNote() { if (!currentNoteId) return; saveNote(currentNoteId, document.getElementById('note-textarea').value); closeNotePopover(); renderTree(); }
+    function closeNotePopover() { document.getElementById('note-popover').classList.add('hidden'); document.getElementById('note-overlay').classList.add('hidden'); currentNoteId = null; }
+    function deleteCurrentNote() { if (!currentNoteId) return; saveNote(currentNoteId, ''); closeNotePopover(); renderTree(); }
+    function deleteAllNotes() { notesStore = {}; localStorage.removeItem(NOTES_KEY); closeNotePopover(); renderTree(); const t = document.getElementById('toast'); t.innerText = 'Notas eliminadas'; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500); }
+    loadNotes();
     
     let isResizing = false, currentHeader = null, startX, startWidth;
     function initResizer(headerCell, colKey) {
@@ -1524,7 +1588,7 @@
             opdesc: { label: 'DESC. OPERACIÓN' }, aprov: { label: 'CL. APROV.' }, esp: { label: 'APROV. ESP.' }, 
             grupo: { label: 'GRUPO' }, relevfab: { label: 'R. Fabricación' },
             desc1: { label: 'Descrip. 1' }, desc2: { label: 'Descrip. 2' }, desc3: { label: 'Descrip. 3' },
-            granel: { label: 'Granel' }
+            granel: { label: 'Granel' }, nota: { label: 'Notas' }
         };
 
         columnOrder.forEach((key, index) => {
@@ -1533,6 +1597,9 @@
             if (key === 'revcheck') {
                 div.innerHTML = `<button class="header-rev-clear" onclick="clearAllReviews()" title="Limpiar todas las revisiones"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
                 div.style.display = 'flex'; div.style.alignItems = 'center'; div.style.justifyContent = 'center';
+            } else if (key === 'nota') {
+                div.innerHTML = `<button class="header-rev-clear" onclick="event.stopPropagation();if(confirm('\u00bfEliminar TODAS las notas? Esta acci\u00f3n no se puede deshacer.'))deleteAllNotes();" title="Borrar todas las notas"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button><span style="flex:1">${c.label}</span>`;
+                div.style.display = 'flex'; div.style.alignItems = 'center'; div.style.gap = '4px';
             } else { div.textContent = c.label; }
             div.draggable = true;
             div.ondragstart = (e) => { e.dataTransfer.setData('text/plain', index); div.classList.add('dragging'); };
@@ -1609,6 +1676,7 @@
                     case 'desc2': cell.innerHTML = `<button class="row-copy-btn" onclick="copyAndFlash(event, '${node.descAmp2.replace(/'/g, "\\'")}', '${node.uid}')" title="Copiar descripción 2">${copyIconSvg}</button><span title="${node.descAmp2}">${node.descAmp2}</span>`; break;
                     case 'desc3': cell.innerHTML = `<button class="row-copy-btn" onclick="copyAndFlash(event, '${node.descAmp3.replace(/'/g, "\\'")}', '${node.uid}')" title="Copiar descripción 3">${copyIconSvg}</button><span title="${node.descAmp3}">${node.descAmp3}</span>`; break;
                     case 'granel': cell.textContent = node.granel; break;
+                    case 'nota': { const noteText = notesStore[noteKey(node)] || ''; const pencilSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`; const btn = document.createElement('button'); btn.className = 'note-btn' + (noteText ? ' has-note' : ''); btn.innerHTML = pencilSvg; btn.title = noteText ? 'Nota: ' + noteText : 'Añadir nota'; btn.onclick = (e) => { openNotePopover(e, noteKey(node)); }; cell.appendChild(btn); if (noteText) { const sp = document.createElement('span'); sp.className = 'note-display'; sp.textContent = noteText; sp.title = noteText; sp.onclick = (e) => { openNotePopover(e, noteKey(node)); }; cell.appendChild(sp); } break; }
                 }
                 head.appendChild(cell);
             });
@@ -1893,7 +1961,7 @@
         if (!hasReviewed && !isFilterActive) return;
 
         const data = [], headerRow = [];
-        const colDict = { level: 'Nivel', pos: 'Nº POS', cclas: 'C. CLAS', comp: 'Componente', desc: 'Descripción', qty: 'Cantidad', padre: 'PADRE', relcc: 'REL. C.C', op: 'OPERACIÓN', opdesc: 'DESC. OPERACIÓN', aprov: 'CL. APROV.', esp: 'APROV. ESP.', grupo: 'GRUPO', relevfab: 'R. Fabricación', desc1: 'Descrip. 1', desc2: 'Descrip. 2', desc3: 'Descrip. 3', granel: 'Granel' };
+        const colDict = { level: 'Nivel', pos: 'Nº POS', cclas: 'C. CLAS', comp: 'Componente', desc: 'Descripción', qty: 'Cantidad', padre: 'PADRE', relcc: 'REL. C.C', op: 'OPERACIÓN', opdesc: 'DESC. OPERACIÓN', aprov: 'CL. APROV.', esp: 'APROV. ESP.', grupo: 'GRUPO', relevfab: 'R. Fabricación', desc1: 'Descrip. 1', desc2: 'Descrip. 2', desc3: 'Descrip. 3', granel: 'Granel', nota: 'Nota' };
         columnOrder.forEach(key => { if(key !== 'revcheck') headerRow.push(colDict[key] || key); }); 
         data.push(headerRow);
 
@@ -1921,6 +1989,7 @@
                     case 'desc2': r.push(n.descAmp2); break;
                     case 'desc3': r.push(n.descAmp3); break;
                     case 'granel': r.push(n.granel); break;
+                    case 'nota': r.push(notesStore[noteKey(n)] || ''); break;
                     default: if(k !== 'revcheck' && k !== 'toggle') r.push("");
                 }
             });
@@ -1992,6 +2061,7 @@
                     case 'desc2': r.push(n.descAmp2); break;
                     case 'desc3': r.push(n.descAmp3); break;
                     case 'granel': r.push(n.granel); break;
+                    case 'nota': r.push(notesStore[noteKey(n)] || ''); break;
                     default: if(k !== 'revcheck' && k !== 'toggle') r.push("");
                 }
             });
