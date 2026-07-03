@@ -982,6 +982,7 @@
     let currentNoteId = null;
     
     const DEFAULT_COLUMNS = ['revcheck', 'toggle', 'level', 'pos', 'cclas', 'comp', 'desc', 'qty', 'padre', 'relcc', 'op', 'opdesc', 'aprov', 'esp', 'grupo', 'relevfab', 'desc1', 'desc2', 'desc3', 'granel', 'nota'];
+    const COLUMN_LABELS = { level: 'Nivel', pos: 'Nº POS', cclas: 'C. CLAS', comp: 'Componente', desc: 'Descripción', qty: 'Cantidad', padre: 'PADRE', relcc: 'REL. C.C', op: 'OPERACIÓN', opdesc: 'DESC. OPERACIÓN', aprov: 'CL. APROV.', esp: 'APROV. ESP.', grupo: 'GRUPO', relevfab: 'R. Fabricación', desc1: 'Descrip. 1', desc2: 'Descrip. 2', desc3: 'Descrip. 3', granel: 'Granel', nota: 'Nota' };
     let columnOrder = [...DEFAULT_COLUMNS];
 
     const container = document.getElementById('bom-tree-container');
@@ -1259,17 +1260,49 @@
         return { active: false, tooltip: "", isError: false };
     }
 
-    function updateErrorStatus() {
-        const errors = allNodesFlattened.filter(n => {
-            const isBaseError = (n.apro === 'E' || n.artGrp === '657T') && n.children.length === 0;
-            const isExcl659J = n.artGrp === '659J' && n.granel === 'X';
-            const isExcl667E = n.artGrp === '667E' && n.unit === 'KG' && parseSAPQuantity(n.qty) >= 1;
-            const isExclE1 = n.artGrp === '657T' && n.spec === 'E1'; 
-            // NUEVA EXCEPCIÓN: Los 657F no deben marcarse como error aunque no tengan hijos
-            const isExcl657F = n.artGrp === '657F'; 
+    function isErrorNode(n) {
+        const isExclTech = (n.artGrp === '659J' && n.granel === 'X') ||
+                           (n.artGrp === '667E' && n.unit === 'KG' && parseSAPQuantity(n.qty) >= 1) ||
+                           (n.artGrp === '657T' && n.spec === 'E1') ||
+                           (n.artGrp === '657F');
+        const structure = (n.apro === 'E' || n.artGrp === '657T') && n.children.length === 0 && !isExclTech;
+        const logistic = (n.unit === 'BOT' || n.unit === 'KG') && parseSAPQuantity(n.qty) >= 1 && n.artGrp !== '693A' && !isExclTech;
+        const s693A = check693AStatus(n);
+        const refr = s693A.active && !s693A.globalOnly;
+        return { structure, logistic, refr, any: structure || logistic || refr, tooltip693A: s693A.tooltip };
+    }
 
-            return isBaseError && !isExcl659J && !isExcl667E && !isExclE1 && !isExcl657F;
+    function buildRowData(n) {
+        const r = [];
+        columnOrder.forEach(k => {
+            switch(k) {
+                case 'level': r.push(n.level); break;
+                case 'pos': r.push(n.pos); break;
+                case 'cclas': r.push(n.cClas); break;
+                case 'comp': r.push(n.id); break;
+                case 'desc': r.push(n.description); break;
+                case 'qty': r.push(n.qty); break;
+                case 'padre': r.push(n.parentBOM); break;
+                case 'relcc': r.push(n.relCC); break;
+                case 'op': r.push(n.op); break;
+                case 'opdesc': r.push(n.opDesc); break;
+                case 'aprov': r.push(n.apro); break;
+                case 'esp': r.push(n.spec); break;
+                case 'grupo': r.push(n.artGrp); break;
+                case 'relevfab': r.push(n.relevFab); break;
+                case 'desc1': r.push(n.descAmp1); break;
+                case 'desc2': r.push(n.descAmp2); break;
+                case 'desc3': r.push(n.descAmp3); break;
+                case 'granel': r.push(n.granel); break;
+                case 'nota': r.push(notesStore[noteKey(n)] || ''); break;
+                default: if(k !== 'revcheck' && k !== 'toggle') r.push("");
+            }
         });
+        return r;
+    }
+
+    function updateErrorStatus() {
+        const errors = allNodesFlattened.filter(n => isErrorNode(n).structure);
 
         const dotRed = document.getElementById('error-status-dot');
         const hasErrors = errors.length > 0;
@@ -1454,16 +1487,7 @@
             lastCheckedMode = mode;
             if (mode === 'ERRORES') {
                 allNodesFlattened.forEach(n => {
-                    const isBaseError = (n.apro === 'E' || n.artGrp === '657T') && n.children.length === 0;
-                    const isExcl659J = n.artGrp === '659J' && n.granel === 'X';
-                    const isExcl667E = n.artGrp === '667E' && n.unit === 'KG' && parseSAPQuantity(n.qty) >= 1;
-                    const isExclE1 = n.artGrp === '657T' && n.spec === 'E1';
-                    const isExcl657F = n.artGrp === '657F';
-                    const isStructureError = isBaseError && !isExcl659J && !isExcl667E && !isExclE1 && !isExcl657F;
-                    const isMaterialAlert = (n.unit === 'BOT' || n.unit === 'KG') && parseSAPQuantity(n.qty) >= 1 && n.artGrp !== '693A' && !isExcl659J && !isExcl667E;
-                    const status693A = check693AStatus(n);
-                    const is693AErrorLocal = status693A.active && !status693A.globalOnly;
-                    if (isStructureError || isMaterialAlert || is693AErrorLocal) {
+                    if (isErrorNode(n).any) {
                         let curr = n._parentRef;
                         while(curr) { curr.expanded = true; curr = curr._parentRef; }
                     }
@@ -1632,20 +1656,8 @@
             
             const hasC = node.children.length > 0 && !isFlatMode;
 
-            // --- CORRECCIÓN PUNTOS ROJOS (Sincronización con updateErrorStatus) ---
-            const isExcl659J = node.artGrp === '659J' && node.granel === 'X';
-            const isExcl667E = node.artGrp === '667E' && node.unit === 'KG' && parseSAPQuantity(node.qty) >= 1;
-            const isExclE1 = node.artGrp === '657T' && node.spec === 'E1'; 
-            const isExcl657F = node.artGrp === '657F'; // Excepción para el grupo que no explosionamos
-
-            const isBaseError = (node.apro === 'E' || node.artGrp === '657T') && node.children.length === 0;
-            const isEmptyFabricated = isBaseError && !isExcl659J && !isExcl667E && !isExclE1 && !isExcl657F;
-            // -----------------------------------------------------------------------
-
+            const { structure: isEmptyFabricated, logistic: isMaterialAlert, refr: show693ADot, tooltip693A } = isErrorNode(node);
             const isRFCC = currentListType !== 'Ingeniería' && (node.relCC === '' || node.relevFab === '');
-            const isMaterialAlert = (node.unit === 'BOT' || node.unit === 'KG') && parseSAPQuantity(node.qty) >= 1 && node.artGrp !== '693A' && !isExcl659J && !isExcl667E;
-            const status693A = check693AStatus(node);
-            const show693ADot = status693A.active && !status693A.globalOnly;
             
             const parentIcon = node._parentUid ? `<button class="go-parent-btn" onclick="goToParent(event, '${node._parentUid}')" title="Ir al padre"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg></button>` : '<div style="width:16px;"></div>';
             const phantomIconSvg = `<svg class="phantom-icon" viewBox="0 0 24 24"><path d="M12,2A10,10,0,0,0,2,12v10l3-2.5,3,2.5,4-3.5,4,3.5,3-2.5,3,2.5V12A10,10,0,0,0,12,2Zm-3,9a1.5,1.5,0,1,1,1.5-1.5A1.5,1.5,0,0,1,9,11Zm6,0a1.5,1.5,0,1,1,1.5-1.5A1.5,1.5,0,0,1,15,11Z"/></svg>`;
@@ -1661,7 +1673,7 @@
                     case 'level': cell.innerHTML = `${parentIcon}<span class="level-badge">${node.level}</span>`; break;
                     case 'pos': cell.textContent = node.pos; break;
                     case 'cclas': cell.textContent = node.cClas; break;
-                    case 'comp': cell.innerHTML = `${isPhantom ? phantomIconSvg : ''}${isOrder ? orderIconSvg : ''}<span class="material-id">${node.id}</span><button class="row-copy-btn" onclick="copyAndFlash(event, '${node.id}', '${node.uid}')" title="Copiar código">${copyIconSvg}</button>${!shouldHideWTIcon ? `<a onclick="copiarYAbrirWindchill(event, '${node.id}', '${node.uid}')" class="windchill-link" title="Copiar código y abrir Windchill"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>` : ''}${isEmptyFabricated ? '<span class="empty-fabricated-dot" title="Componente sin subcomponentes"></span>' : ''}${isRFCC ? '<span class="rfcc-dot" title="No relevante para fabricación o costes"></span>' : ''}${isMaterialAlert ? '<span class="material-alert-dot" title="Alerta: Envase/Peso (BOT/KG >= 1)"></span>' : ''}${show693ADot ? `<span class="warning-693a-dot" title="${status693A.tooltip}"></span>` : ''}`; break;
+                    case 'comp': cell.innerHTML = `${isPhantom ? phantomIconSvg : ''}${isOrder ? orderIconSvg : ''}<span class="material-id">${node.id}</span><button class="row-copy-btn" onclick="copyAndFlash(event, '${node.id}', '${node.uid}')" title="Copiar código">${copyIconSvg}</button>${!shouldHideWTIcon ? `<a onclick="copiarYAbrirWindchill(event, '${node.id}', '${node.uid}')" class="windchill-link" title="Copiar código y abrir Windchill"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>` : ''}${isEmptyFabricated ? '<span class="empty-fabricated-dot" title="Componente sin subcomponentes"></span>' : ''}${isRFCC ? '<span class="rfcc-dot" title="No relevante para fabricación o costes"></span>' : ''}${isMaterialAlert ? '<span class="material-alert-dot" title="Alerta: Envase/Peso (BOT/KG >= 1)"></span>' : ''}${show693ADot ? `<span class="warning-693a-dot" title="${tooltip693A}"></span>` : ''}`; break;
                     case 'desc': cell.innerHTML = `<button class="row-copy-btn" onclick="copyAndFlash(event, '${node.description.replace(/'/g, "\\'")}', '${node.uid}')" title="Copiar descripción">${copyIconSvg}</button><span title="${[node.description, node.descAmp1, node.descAmp2, node.descAmp3].filter(v => v && v.trim() !== "").join('\n')}">${node.description}</span>`; break;
                     case 'qty': cell.innerHTML = `<span class="qty-badge">${node.qty} ${node.unit}</span>`; break;
                     case 'padre': cell.innerHTML = `<span class="filterable-text">${node.parentBOM}</span>${node.parentBOM ? `<button class="row-copy-btn" onclick="copyAndFlash(event, '${node.parentBOM}', '${node.uid}')" title="Copiar padre">${copyIconSvg}</button>` : ''}`; if (node.parentBOM) { cell.querySelector('span').onclick = (e) => { e.stopPropagation(); document.getElementById('subconjunto-input').value = node.parentBOM; applyGlobalFilters(); }; } break;
@@ -1791,21 +1803,7 @@
                                 (!isUnassignedOpMode || n.op === '');
                 
                 // 6. Lógica de ERRORES
-                let isErrMatch = true;
-                if (isErrorF) {
-                    const isExclTech = (n.artGrp === '659J' && n.granel === 'X') || 
-                                       (n.artGrp === '667E' && n.unit === 'KG' && parseSAPQuantity(n.qty) >= 1) ||
-                                       (n.artGrp === '657T' && n.spec === 'E1') || 
-                                       (n.artGrp === '657F');
-                    
-                    const isStructureError = (n.apro === 'E' || n.artGrp === '657T') && n.children.length === 0 && !isExclTech;
-                    const isMaterialAlert = (n.unit === 'BOT' || n.unit === 'KG') && parseSAPQuantity(n.qty) >= 1 && n.artGrp !== '693A' && !isExclTech;
-                    
-                    const local693A = check693AStatus(n);
-                    const is693AErrorLocal = local693A.active && !local693A.globalOnly;
-                    
-                    isErrMatch = isStructureError || isMaterialAlert || is693AErrorLocal;
-                }
+                const isErrMatch = !isErrorF || isErrorNode(n).any;
 
                 // 7. Sumarización y Marcado
                 if (isMatch && isErrMatch) { 
@@ -1928,19 +1926,7 @@
                 else if (mode === 'CHAPA') s = ['657-', '657A', '657T', '657P', '657V'].includes(n.artGrp); 
                 else if (mode === 'GRANELES') s = n.granel === 'X'; 
                 else if (mode === 'RFCC') s = currentListType !== 'Ingeniería' && (n.relCC === '' || n.relevFab === ''); 
-                else if (mode === 'ERRORES') {
-                    const isExcl659J = n.artGrp === '659J' && n.granel === 'X';
-                    const isExcl667E = n.artGrp === '667E' && n.unit === 'KG' && parseSAPQuantity(n.qty) >= 1;
-                    // CORRECCIÓN: Se valida n.spec (Aprov. Especial) para detectar el E1
-                    const isExclE1 = n.artGrp === '657T' && n.spec === 'E1';
-                    const isExcl657F = n.artGrp === '657F';
-                    const isBaseError = (n.apro === 'E' || n.artGrp === '657T') && n.children.length === 0;
-                    const isStructureError = isBaseError && !isExcl659J && !isExcl667E && !isExclE1 && !isExcl657F;
-                    const isLogAlert = ((n.unit === 'BOT' || n.unit === 'KG') && parseSAPQuantity(n.qty) >= 1 && n.artGrp !== '693A' && !isExcl659J && !isExcl667E);
-                    const status693A = check693AStatus(n);
-                    const is693AErrorLocal = status693A.active && !status693A.globalOnly;
-                    s = isStructureError || isLogAlert || is693AErrorLocal;
-                }
+                else if (mode === 'ERRORES') { s = isErrorNode(n).any; }
                 if (s) { n.matchesFilter = true; if (!lastGroupedMatches.has(n.id)) lastGroupedMatches.set(n.id, { item: n, totalQty: 0 }); lastGroupedMatches.get(n.id).totalQty += parseSAPQuantity(n.qty); }
                 const cM = check(n.children, s || pM); n.isVisible = s || cM || pM; 
                 if (cM || s) n.expanded = true; 
@@ -1961,59 +1947,29 @@
         if (!hasReviewed && !isFilterActive) return;
 
         const data = [], headerRow = [];
-        const colDict = { level: 'Nivel', pos: 'Nº POS', cclas: 'C. CLAS', comp: 'Componente', desc: 'Descripción', qty: 'Cantidad', padre: 'PADRE', relcc: 'REL. C.C', op: 'OPERACIÓN', opdesc: 'DESC. OPERACIÓN', aprov: 'CL. APROV.', esp: 'APROV. ESP.', grupo: 'GRUPO', relevfab: 'R. Fabricación', desc1: 'Descrip. 1', desc2: 'Descrip. 2', desc3: 'Descrip. 3', granel: 'Granel', nota: 'Nota' };
-        columnOrder.forEach(key => { if(key !== 'revcheck') headerRow.push(colDict[key] || key); }); 
+        columnOrder.forEach(key => { if(key !== 'revcheck' && key !== 'toggle') headerRow.push(COLUMN_LABELS[key] || key); }); 
         data.push(headerRow);
 
         const isFlat = (flatViewCheckbox.checked && !flatViewCheckbox.disabled);
 
-        const buildRow = (n) => {
-            const r = [];
-            columnOrder.forEach(k => {
-                switch(k) {
-                    case 'level': r.push(n.level); break;
-                    case 'pos': r.push(n.pos); break;
-                    case 'cclas': r.push(n.cClas); break;
-                    case 'comp': r.push(n.id); break;
-                    case 'desc': r.push(n.description); break;
-                    case 'qty': r.push(n.qty); break;
-                    case 'padre': r.push(n.parentBOM); break;
-                    case 'relcc': r.push(n.relCC); break;
-                    case 'op': r.push(n.op); break;
-                    case 'opdesc': r.push(n.opDesc); break;
-                    case 'aprov': r.push(n.apro); break;
-                    case 'esp': r.push(n.spec); break;
-                    case 'grupo': r.push(n.artGrp); break;
-                    case 'relevfab': r.push(n.relevFab); break;
-                    case 'desc1': r.push(n.descAmp1); break;
-                    case 'desc2': r.push(n.descAmp2); break;
-                    case 'desc3': r.push(n.descAmp3); break;
-                    case 'granel': r.push(n.granel); break;
-                    case 'nota': r.push(notesStore[noteKey(n)] || ''); break;
-                    default: if(k !== 'revcheck' && k !== 'toggle') r.push("");
-                }
-            });
-            return r;
-        };
-
         if (hasReviewed) {
-            // Prioridad: Solo lo seleccionado
-            reviewedNodes.forEach(n => data.push(buildRow(n)));
+            reviewedNodes.forEach(n => data.push(buildRowData(n)));
         } else if (isFlat) {
-            // Filtro activo en modo plano
-            allNodesFlattened.forEach(n => { if (n.matchesFilter) data.push(buildRow(n)); });
+            allNodesFlattened.forEach(n => { if (n.matchesFilter) data.push(buildRowData(n)); });
         } else {
-            // Filtro activo en modo árbol
-            const extract = (nodes) => nodes.forEach(n => { if (n.isVisible) { data.push(buildRow(n)); extract(n.children); } });
+            const extract = (nodes) => nodes.forEach(n => { if (n.isVisible) { data.push(buildRowData(n)); extract(n.children); } });
             extract(bomTree);
         }
 
-        const ws = XLSX.utils.aoa_to_sheet(data), wb = XLSX.utils.book_new(); 
+        const typedData = data.map((row, ri) => ri === 0 ? row : row.map(v =>
+            typeof v === 'number' ? v : { t: 's', v: v != null ? String(v) : '' }
+        ));
+        const ws = XLSX.utils.aoa_to_sheet(typedData), wb = XLSX.utils.book_new(); 
         XLSX.utils.book_append_sheet(wb, ws, "BOM SAP"); 
-        XLSX.writeFile(wb, `BOM_Export.xlsx`);
+        _downloadXlsx(wb, 'BOM_Export.xlsx');
     }
 
-    function exportSummaryToExcel() { if (lastGroupedMatches.size === 0) return; const data = [["Componente", "Descripción", "Cantidad Total"]]; lastGroupedMatches.forEach(d => data.push([d.item.id, d.item.description, d.totalQty])); const ws = XLSX.utils.aoa_to_sheet(data), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Resumen"); XLSX.writeFile(wb, `Resumen_BOM.xlsx`); }
+    function exportSummaryToExcel() { if (lastGroupedMatches.size === 0) return; const data = [["Componente", "Descripción", "Cantidad Total"]]; lastGroupedMatches.forEach(d => data.push([{ t:'s', v: d.item.id }, { t:'s', v: d.item.description }, d.totalQty])); const ws = XLSX.utils.aoa_to_sheet(data), wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Resumen"); _downloadXlsx(wb, 'Resumen_BOM.xlsx'); }
     
     function copySummaryToClipboard() {
         if (lastGroupedMatches.size === 0) return;
@@ -2036,50 +1992,42 @@
         const hasReviewed = reviewedNodes.length > 0;
         if (!hasReviewed && !isFilterActive) return;
 
-        let out = columnOrder.filter(k => k !== 'revcheck' && k !== 'toggle').join("\t") + "\n";
+        let out = columnOrder.filter(k => k !== 'revcheck' && k !== 'toggle').map(k => COLUMN_LABELS[k] || k).join("\t") + "\n";
         const isFlat = (flatViewCheckbox.checked && !flatViewCheckbox.disabled);
 
-        const getNodeText = (n) => { 
-            const r = [];
-            columnOrder.forEach(k => {
-                switch(k) {
-                    case 'level': r.push(n.level); break;
-                    case 'pos': r.push(n.pos); break;
-                    case 'cclas': r.push(n.cClas); break;
-                    case 'comp': r.push(n.id); break;
-                    case 'desc': r.push(n.description); break;
-                    case 'qty': r.push(n.qty); break;
-                    case 'padre': r.push(n.parentBOM); break;
-                    case 'relcc': r.push(n.relCC); break;
-                    case 'op': r.push(n.op); break;
-                    case 'opdesc': r.push(n.opDesc); break;
-                    case 'aprov': r.push(n.apro); break;
-                    case 'esp': r.push(n.spec); break;
-                    case 'grupo': r.push(n.artGrp); break;
-                    case 'relevfab': r.push(n.relevFab); break;
-                    case 'desc1': r.push(n.descAmp1); break;
-                    case 'desc2': r.push(n.descAmp2); break;
-                    case 'desc3': r.push(n.descAmp3); break;
-                    case 'granel': r.push(n.granel); break;
-                    case 'nota': r.push(notesStore[noteKey(n)] || ''); break;
-                    default: if(k !== 'revcheck' && k !== 'toggle') r.push("");
-                }
-            });
-            return r.join("\t") + "\n";
-        };
-
         if (hasReviewed) {
-            // Prioridad: Seleccionados
-            reviewedNodes.forEach(n => { out += getNodeText(n); });
+            reviewedNodes.forEach(n => { out += buildRowData(n).map(_tsvCell).join("\t") + "\n"; });
         } else if (isFlat) {
-            // Filtrados plano
-            allNodesFlattened.forEach(n => { if (n.matchesFilter) out += getNodeText(n); });
+            allNodesFlattened.forEach(n => { if (n.matchesFilter) out += buildRowData(n).map(_tsvCell).join("\t") + "\n"; });
         } else { 
-            // Filtrados árbol
-            const tr = (nodes) => nodes.forEach(n => { if (n.isVisible) { out += getNodeText(n); tr(n.children); } }); 
+            const tr = (nodes) => nodes.forEach(n => { if (n.isVisible) { out += buildRowData(n).map(_tsvCell).join("\t") + "\n"; tr(n.children); } }); 
             tr(bomTree); 
         }
         executeCopy(out);
+    }
+
+    function _tsvCell(v) {
+        const s = v != null ? String(v) : '';
+        return (s.includes(',') || s.includes('"') || s.includes('\t') || s.includes('\n'))
+            ? '"' + s.replace(/"/g, '""') + '"'
+            : s;
+    }
+
+    function _tsvCell(v) {
+        const s = v != null ? String(v) : '';
+        return (s.includes(',') || s.includes('"') || s.includes('\t') || s.includes('\n'))
+            ? '"' + s.replace(/"/g, '""') + '"'
+            : s;
+    }
+
+    function _downloadXlsx(wb, filename) {
+        const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
     }
 
     function executeCopy(text) { 
