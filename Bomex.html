@@ -605,7 +605,7 @@
         <aside id="analysis-panel">
             <h3>Análisis del Equipo</h3>
             <div id="stats-summary" class="stat-card hidden">
-                <div><div class="stat-label">CÓDIGO</div><div id="equipment-code" class="stat-value">-</div></div>
+                <div><div class="stat-label">CÓDIGO</div><div style="display:flex;align-items:center;gap:6px;"><div id="equipment-code" class="stat-value">-</div><a id="equipment-wt-link" onclick="abrirWindchillEquipo(event)" class="windchill-link" title="Copiar código y abrir Windchill" style="display:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a></div></div>
                 <div><div class="stat-label">DESCRIPCIÓN</div><div id="equipment-desc" class="stat-value">-</div></div>
                 <div><div class="stat-label">Tipo de Lista</div><div id="list-type" class="stat-value">-</div></div>
                 <div><div class="stat-label">FECHA BOM</div><div id="list-date" class="stat-value">-</div></div>
@@ -1460,6 +1460,7 @@
         if (eqDesc === "-" && allNodesFlattened.length > 0) eqDesc = allNodesFlattened[0].description;
 
         document.getElementById('equipment-code').innerText = eqCode;
+        document.getElementById('equipment-wt-link').style.display = (eqCode && eqCode !== '-') ? 'inline-flex' : 'none';
         document.getElementById('equipment-desc').innerText = eqDesc;
         document.getElementById('total-items').innerText = items.length;
         updateErrorStatus(); 
@@ -2075,6 +2076,11 @@
 
         document.getElementById('help-modal').style.display = 'none'; 
         document.getElementById('csv-instructions-modal').style.display = 'none'; 
+    }
+    function abrirWindchillEquipo(event) {
+        event.stopPropagation();
+        const code = document.getElementById('equipment-code').innerText.trim();
+        if (code && code !== '-') { executeCopy(code); window.open(WINDCHILL_APP_URL, '_blank'); }
     }
     function copiarYAbrirWindchill(event, componentId, uid) {
         event.stopPropagation(); executeCopy(componentId);
